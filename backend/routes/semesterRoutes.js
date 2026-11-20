@@ -12,6 +12,7 @@ import {
   savePdfsMetadata,
   deletePdf,
   uploadCoursePdf,
+  saveLearningPdfMetadata,
   getSemesterFile,
 } from "../controllers/semesterController.js";
 
@@ -40,8 +41,11 @@ router.post('/courses/:courseId/pdfs/upload-urls', uploadPdfs);
 router.post('/:semesterId/courses/:courseId/pdfs/save', savePdfsMetadata);
 
 // Upload a single merged file for learning
-// Request signed upload URL for learning PDF
-router.post("/:semesterId/courses/:courseId/addForLearning", upload.single('file'), uploadCoursePdf);
+// Get the ticket/signed URL (JSON payload, no Multer)
+router.post("/:semesterId/courses/:courseId/addForLearning", uploadCoursePdf);
+
+// Save database metadata and kick off processPdf (JSON payload, no Multer)
+router.post("/:semesterId/courses/:courseId/addForLearning/save", saveLearningPdfMetadata);
 
 // Get the single merged file for learning
 router.get("/:semesterId/courses/:courseId/getForLearning", getSemesterFile);
