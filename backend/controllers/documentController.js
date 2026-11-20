@@ -5,7 +5,9 @@ import { extractTextFromPDF } from "../utils/pdfParser.js";
 import { chunkText } from "../utils/textChunker.js";
 import fs from "fs/promises";
 import mongoose from "mongoose";
-import cloudinary from "../config/cloudinary.js";
+// import cloudinary from "../config/cloudinary.js";
+import { supabase } from '../config/supabase.js'; // Adjust path as needed
+import crypto from 'crypto';
 
 // pdfParser & textChunker -> Alat bantu untuk mengubah file mentah (PDF) menjadi format data teks 
 // yang siap diolah oleh mesin pencari atau sistem AI.
@@ -20,24 +22,23 @@ import cloudinary from "../config/cloudinary.js";
 // deleteDocument -> Menghapus data dokumen dari database secara permanen. 
 // Fungsi ini juga bertugas menghapus file fisik di penyimpanan server (menggunakan fs) serta membersihkan data terkait seperti Flashcard dan Quiz yang terhubung dengan dokumen tersebut.
 
-
 //@desc -> Upload PDF document
 //@route -> POST /api/document/upload
 //@access PRIVATE
+// GENERATE SIGNED URL (Bypasses Vercel 4.5MB limit)
 export const uploadDocument = async (req, res, next) => {
     try {
-        if(!req.file) {
+        const { fileName, title } = req.body;
+
+        if (!fileName) {
             return res.status(400).json({
                 success: false,
-                error: "Please upload a PDF File!",
+                error: "Please provide a file name!",
                 statusCode: 400
             });
         }
 
-        const { title } = req.body;
-
-        if(!title) {
-            // Delete uploaded file if no title provided
+        if (!title) {
             return res.status(400).json({
                 success: false,
                 error: "Please provide a document title!",
@@ -45,36 +46,61 @@ export const uploadDocument = async (req, res, next) => {
             });
         }
 
-        // Construct the URL for the uploaded file
-        // Convert the buffer from memory to a Base64 string
-        const fileBase64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
+        // Generate a safe, unique file name to avoid overlaps
+        const fileExtension = fileName.split('.').pop();
+        const uniqueFileName = `${crypto.randomUUID()}.${fileExtension}`;
+        const filePath = `documents/${uniqueFileName}`; // Folder path inside your bucket
 
-        // Upload to Cloudinary
-        const uploadResponse = await cloudinary.uploader.upload(fileBase64, {
-            folder: "ai_learning_assistant/documents",
-            resource_type: "auto",
+        // Create a Supabase Signed Upload URL (Bypasses Vercel's 4.5MB limit!)
+        const { data, error } = await supabase.storage
+            .from('uploads') // Your bucket name
+            .createSignedUploadUrl(filePath);
+
+        if (error) 
+            throw new Error(`Failed to generate upload URL: ${error.message}`);
+
+        // Construct the final public URL where the file will live after frontend uploads it
+        const publicUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/uploads/${filePath}`;
+
+        // Send the signed URL and tokens back to the frontend
+        res.status(200).json({
+            success: true,
+            signedUrl: data.signedUrl,  // Frontend uses this to upload directly
+            path: filePath,
+            publicUrl: publicUrl,       // Frontend sends this back when saving metadata
+            message: "Signed upload URL generated successfully."
         });
 
-        const fileUrl = uploadResponse.secure_url;
-        
-        // Create a document record
+    } catch (error) {
+        next(error);
+    }
+};
+
+// SAVE METADATA (Called after frontend successfully uploads direct to Supabase)
+export const saveDocumentMetadata = async (req, res, next) => {
+    try {
+        const { title, fileName, filePath, fileSize } = req.body;
+
+        if (!title || !filePath) 
+            return res.status(400).json({ success: false, error: "Title and file path are required" });
+
         const document = await Document.create({
             userId: req.user._id,
             title,
-            fileName: req.file.originalname,
-            filePath: fileUrl,  // store the URL instead of the local path
-            fileSize: req.file.size,
+            fileName,
+            filePath,  // The public Supabase URL
+            fileSize: fileSize || 0,
             status: "processing",
             docType: "private"
         });
 
-        // This keeps the Vercel function alive until the PDF is parsed
-        await processPdf(document._id, fileUrl);
+        // Trigger your background PDF processing (if you have one)
+        await processPdf(document._id, filePath);
 
         res.status(201).json({
             success: true,
             data: document,
-            message: "Document uploaded successfully. Processing in progress..."
+            message: "Document metadata saved successfully. Processing in progress..."
         });
 
     } catch (error) {
@@ -237,10 +263,32 @@ export const deleteDocument = async (req, res, next) => {
             });
         }
 
-        // Delete file from filesystem
-        await fs.unlink(document.filePath).catch(() => {});
+        // If a file URL exists in Supabase Storage, delete it to save space
+        if (document.filePath) {
+            try {
+                // Extract the relative path from the Supabase public URL 
+                // Example URL: https://xyz.supabase.co/storage/v1/object/public/uploads/documents/uuid.pdf
+                // We need: documents/uuid.pdf
+                const urlParts = document.filePath.split('/uploads/');
+                
+                if (urlParts.length > 1) {
+                    const filePath = urlParts[1]; // e.g., "documents/uuid.pdf" or "learning_pdfs/uuid.pdf"
 
-        // Delete Document
+                    const { error: storageError } = await supabase.storage
+                        .from('uploads')
+                        .remove([filePath]);
+
+                    if (storageError) {
+                        console.error("Failed to delete file from Supabase storage:", storageError.message);
+                    }
+                }
+            } catch (storageErr) {
+                // Non-blocking: Log it so deletion of the record can still proceed if needed
+                console.error("Error parsing/deleting file from Supabase:", storageErr);
+            }
+        }
+
+        // Delete Document record from MongoDB
         await document.deleteOne();
 
         res.status(200).json({

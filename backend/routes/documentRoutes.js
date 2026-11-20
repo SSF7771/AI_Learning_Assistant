@@ -3,7 +3,8 @@ import {
     uploadDocument,
     getDocuments,
     getSingleDocument,
-    deleteDocument
+    deleteDocument,
+    saveDocumentMetadata
 } from "../controllers/documentController.js";
 import protect from "../middlewares/auth.js";
 import upload from "../config/multer.js";
@@ -14,7 +15,11 @@ const router = express.Router();
 
 router.use(protect);
 
-router.post("/upload", upload.single('file'), uploadDocument);
+// Frontend calls this to get the ticket (named uploadDocument!)
+router.post('/upload', uploadDocument);
+
+// Frontend calls this after direct-uploading to Supabase to save to MongoDB
+router.post('/save-metadata', saveDocumentMetadata);
 router.get("/", getDocuments);
 router.get("/:id", getSingleDocument);
 router.delete("/:id", deleteDocument);

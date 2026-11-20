@@ -9,9 +9,10 @@ import {
   addCourse,
   deleteCourse,
   uploadPdfs,
+  savePdfsMetadata,
   deletePdf,
   uploadCoursePdf,
-  getSemesterFile
+  getSemesterFile,
 } from "../controllers/semesterController.js";
 
 // Create a new semester
@@ -34,12 +35,12 @@ router.delete("/:semesterId/courses/:courseId", deleteCourse);
 
 // Upload multiple PDFs
 // 'pdfs' is the field name for the frontend FormData
-router.post("/:semesterId/courses/:courseId/pdfs", upload.array("pdfs", 5), uploadPdfs);
-
-// Delete a PDF
-router.delete("/:semesterId/courses/:courseId/pdfs/:pdfId", deletePdf);
+router.post('/courses/:courseId/pdfs/upload-urls', uploadPdfs);
+// Save the metadata array to MongoDB after direct Supabase upload
+router.post('/:semesterId/courses/:courseId/pdfs/save', savePdfsMetadata);
 
 // Upload a single merged file for learning
+// Request signed upload URL for learning PDF
 router.post("/:semesterId/courses/:courseId/addForLearning", upload.single('file'), uploadCoursePdf);
 
 // Get the single merged file for learning

@@ -207,9 +207,9 @@ export const generateSummary = async (req, res, next) => {
         const summary = await geminiService.generateSummary(document.extractedText);
 
         // Deduct tokens from user
-        await User.findByIdAndUpdate(req.user._id, {
-            $inc: { tokens: -TOKEN_COST }
-        });
+        // await User.findByIdAndUpdate(req.user._id, {
+        //     $inc: { tokens: -TOKEN_COST }
+        // });
 
         res.status(201).json({
             success: true,
