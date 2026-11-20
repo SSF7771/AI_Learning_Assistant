@@ -61,9 +61,9 @@ const LoginPage = () => {
           </div>
 
           {/* FORM */}
-          <div className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* EMAIL FIELD */}
             <div className="space-y-2">
-              {/* EMAIL FIELD */}
               <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide">
                 Email
               </label>
@@ -127,9 +127,9 @@ const LoginPage = () => {
               </div>
             )}
 
-            {/* SUBMIT BUTTON */}
+            {/* SUBMIT BUTTON - Notice onClick is removed, type="submit" handles it natively */}
             <button
-              onClick={handleSubmit}
+              type="submit"
               disabled={loading}
               className="group relative w-full h-12 bg-linear-to-r from-blue-500 to-teal-500 hover:from-blue-600 hover:to-teal-600 active:scale-[0.98] text-white text-sm font-semibold rounded-xl transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 shadow-lg shadow-blue-500/25 overflow-hidden"
             >
@@ -149,9 +149,9 @@ const LoginPage = () => {
                   </>
                 )}
               </span>
-              <div className="absolute inset-0 bg-linear-to-r from-white/0 via-white/20 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
+              <div className="absolute inset-0 bg-linear-to-r from-white/0 via-white/20 to-white/0 -translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
             </button>
-          </div>
+          </form>
 
           {/* FOOTER */}
           <div className="mt-8 pt-6 border-t border-slate-200/60">
