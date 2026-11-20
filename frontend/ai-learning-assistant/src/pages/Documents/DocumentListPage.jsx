@@ -51,18 +51,37 @@ const DocumentListPage = () => {
     e.preventDefault();
 
     if (!uploadFile || !uploadTitle) {
-      toast.error("Please provide a title and a wanted file!");
+      toast.error("Please provide a title and a file!");
       return;
     }
 
     setUploading(true);
 
-    const formData = new FormData();
-    formData.append("file", uploadFile);
-    formData.append("title", uploadTitle);
-
     try {
-      await docuentService.uploadDocument(formData);
+      // Get the Signed Upload URL and public target path from your backend
+      const { signedUrl, publicUrl, path } =
+        await docuentService.getUploadSignedUrl(uploadFile.name, uploadTitle);
+
+      // Upload the file DIRECTLY to Supabase Storage (Bypasses Vercel 4.5MB limit!)
+      const uploadResponse = await fetch(signedUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": uploadFile.type,
+        },
+        body: uploadFile, // The raw file object from input
+      });
+
+      if (!uploadResponse.ok) 
+        throw new Error("Direct upload to Supabase storage failed.");
+
+      // Tell backend to create the MongoDB document record
+      await docuentService.saveDocumentMetadata({
+        title: uploadTitle,
+        fileName: uploadFile.name,
+        filePath: publicUrl, // Permanent public URL in Supabase
+        fileSize: uploadFile.size,
+      });
+
       toast.success("Document uploaded successfully!");
       setUploadModalOpen(false);
       setUploadFile(null);
@@ -237,14 +256,10 @@ const DocumentListPage = () => {
                     </div>
                     <p className="text-sm font-medium text-slate-700 mb-1">
                       {uploadFile ? (
-                        <span className="text-blue-600">
-                          {uploadFile.name}
-                        </span>
+                        <span className="text-blue-600">{uploadFile.name}</span>
                       ) : (
                         <>
-                          <span className="text-blue-600">
-                            Click to upload
-                          </span>{" "}
+                          <span className="text-blue-600">Click to upload</span>{" "}
                           or drag and drop
                         </>
                       )}

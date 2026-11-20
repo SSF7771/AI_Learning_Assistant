@@ -85,25 +85,59 @@ const SemesterDetailsPage = () => {
     }
   };
 
-  // UPLOAD PDF (Multi-file)
+  // UPLOAD PDFs (Multi-file - Direct to Supabase)
   const handleFileUpload = async () => {
     if (!selectedFiles || selectedFiles.length === 0) return;
-
-    const formData = new FormData();
-    selectedFiles.forEach((file) => formData.append("pdfs", file));
 
     setUploading(true);
 
     try {
-      await semesterService.uploadPdfs(semester._id, targetCourseId, formData);
+      // Convert FileList / array to a standard array if it isn't already
+      const fileArray = Array.from(selectedFiles);
 
-      toast.success(`${selectedFiles.length} file(s) uploaded successfully!`);
+      // Ask your backend for batch signed upload URLs (Bypasses Vercel 4.5MB limit)
+      const uploadTokens = await semesterService.uploadPdfs(
+        semester._id,
+        targetCourseId,
+        fileArray,
+      );
+
+      // Upload all files DIRECTLY to Supabase Storage in parallel using fetch (PUT)
+      const uploadPromises = uploadTokens.map(async (tokenObj, index) => {
+        const fileObject = fileArray[index];
+
+        const uploadRes = await fetch(tokenObj.signedUrl, {
+          method: "PUT",
+          headers: { "Content-Type": fileObject.type },
+          body: fileObject, // Raw file binary sent straight to Supabase
+        });
+
+        if (!uploadRes.ok) 
+          throw new Error(`Failed to upload ${fileObject.name} to storage.`);
+
+        return {
+          fileName: tokenObj.fileName,
+          fileUrl: tokenObj.fileUrl,
+          storagePath: tokenObj.storagePath,
+        };
+      });
+
+      const finalizedPdfs = await Promise.all(uploadPromises);
+
+      // Send the finalized metadata array back to backend to save into MongoDB
+      await semesterService.savePdfsMetadata(
+        semester._id,
+        targetCourseId,
+        finalizedPdfs,
+      );
+
+      toast.success(`${fileArray.length} file(s) uploaded successfully!`);
       setSelectedFiles([]);
       setFilesModalOpen(false);
 
       fetchSemesterDetails(); // Refresh
     } catch (err) {
-      toast.error("Upload failed: ", err.message);
+      toast.error(err.message || "Upload failed..");
     } finally {
       setUploading(false);
     }

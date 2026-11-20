@@ -3,7 +3,9 @@ import Document from "../models/Document.js";
 import path from "path";
 import { extractTextFromPDF } from "../utils/pdfParser.js";
 import { chunkText } from "../utils/textChunker.js";
-import cloudinary from "../config/cloudinary.js";
+// import cloudinary from "../config/cloudinary.js";
+import { supabase } from '../config/supabase.js'; // Adjust path as needed
+import crypto from 'crypto';
 
 // createSemester -> Membuat entitas semester baru (misalnya Semester 1, 2, dst.) 
 // ke dalam model Semester sebagai wadah utama organisasi mata kuliah.
@@ -155,38 +157,67 @@ export const addCourse = async (req, res, next) => {
 
 // @desc    Upload multiple PDFs to a specific course
 // @route   POST /api/semesters/:semesterId/courses/:courseId/pdfs
+// GENERATE SIGNED URLS FOR MULTIPLE FILES (Bypasses Vercel 4.5MB limit)
 export const uploadPdfs = async (req, res, next) => {
   try {
-    const { semesterId, courseId } = req.params;
+    const { files } = req.body; // Expecting an array of objects: [{ fileName: "book1.pdf" }, { fileName: "book2.pdf" }]
 
-    // req.files is populated by multer
-    if (!req.files || req.files.length === 0)
+    if (!files || !Array.isArray(files) || files.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "No files uploaded",
+        message: "No files provided",
         statusCode: 400,
       });
+    }
 
-    // WITH CLOUDINARY
-    // Upload all files to Cloudinary in parallel
-    const uploadPromises = req.files.map(async (file) => {
-      // Convert buffer to Base64
-      const fileBase64 = `data:${file.mimetype};base64,${file.buffer.toString("base64")}`;
-      
-      // Upload to Cloudinary
-      const result = await cloudinary.uploader.upload(fileBase64, {
-        folder: "ai_learning_assistant/pdfs",
-        resource_type: "auto",
-      });
+    // Generate signed upload URLs in parallel for all files
+    const urlPromises = files.map(async (file) => {
+      const fileExtension = file.fileName.split('.').pop();
+      const uniqueFileName = `${crypto.randomUUID()}.${fileExtension}`;
+      const filePath = `pdfs/${uniqueFileName}`;
+
+      const { data, error } = await supabase.storage
+        .from('uploads')
+        .createSignedUploadUrl(filePath);
+
+      if (error) {
+        throw new Error(`Failed to generate upload URL for ${file.fileName}: ${error.message}`);
+      }
+
+      const publicUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/uploads/${filePath}`;
 
       return {
-        fileName: file.originalname,
-        fileUrl: result.secure_url, // This is the permanent Cloudinary link
-        cloudinaryId: result.public_id // Good practice to store this for later deletion
+        fileName: file.fileName,
+        signedUrl: data.signedUrl,
+        storagePath: filePath,
+        fileUrl: publicUrl
       };
     });
 
-    const newPdfs = await Promise.all(uploadPromises)
+    const uploadTokens = await Promise.all(urlPromises);
+
+    res.status(200).json({
+      success: true,
+      data: uploadTokens,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// SAVE PDF METADATA TO MONGODB (Called after frontend uploads files direct to Supabase)
+export const savePdfsMetadata = async (req, res, next) => {
+  try {
+    const { semesterId, courseId } = req.params;
+    const { pdfs } = req.body; // Expecting an array of: [{ fileName, fileUrl, storagePath }]
+
+    if (!pdfs || !Array.isArray(pdfs) || pdfs.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No PDF metadata provided",
+        statusCode: 400,
+      });
+    }
 
     const updatedSemester = await Semester.findOneAndUpdate(
       {
@@ -196,26 +227,28 @@ export const uploadPdfs = async (req, res, next) => {
       {
         $push: {
           "courses.$.pdfs": {
-            $each: newPdfs,
+            $each: pdfs,
           },
         },
       },
       { new: true },
     );
 
-    if (!updatedSemester)
+    if (!updatedSemester) {
       return res.status(404).json({
         success: false,
         message: "Semester or Course not found",
         statusCode: 404,
       });
+    }
 
     res.status(200).json({
       success: true,
       data: updatedSemester,
+      message: "PDFs added successfully!"
     });
   } catch (error) {
-      next(error);
+    next(error);
   }
 };
 
@@ -240,7 +273,7 @@ export const deletePdf = async (req, res, next) => {
     if (!course) {
       return res.status(404).json({
         success: false,
-        message: "Semester not found!",
+        message: "Course not found!",
       });
     }
 
@@ -254,18 +287,22 @@ export const deletePdf = async (req, res, next) => {
     }
 
     try {
-      // Extract the public_id from the Cloudinary URL
-      const urlParts = pdf.fileUrl.split("/");
-      const fileNameWithExtension = urlParts.pop(); // filename.pdf
-      const folder = urlParts.slice(urlParts.indexOf("upload") + 2).join("/"); // folder
-      const publicId = `${folder}/${fileNameWithExtension.split(".")[0]}`; // folder/filename
+      // Delete from Supabase Storage
+      // Extract it dynamically from the public fileUrl string
+      const urlParts = pdf.fileUrl.split('/uploads/');
+      if (urlParts.length > 1) {
+        const filePath = urlParts[1]; // e.g., "pdfs/uuid.pdf"
 
-      // Delete from Cloudinary
-      // resource_type should be "image" for PDFs uploaded via "auto" or "image"
-      await cloudinary.uploader.destroy(publicId);
-      
+        const { error: storageError } = await supabase.storage
+          .from('uploads')
+          .remove([filePath]);
+
+        if (storageError) {
+          console.error("Supabase deletion failed:", storageError.message);
+        }
+      }
     } catch (err) {
-      console.error("Cloudinary deletion failed:", err.message);
+      console.error("File deletion from storage failed:", err.message);
     }
 
     // Remove the PDF from the array using $pull
@@ -323,6 +360,7 @@ export const deleteCourse = async (req, res, next) => {
 
 // @desc    Upload a single merged pdf file for learning portal
 // @route   POST /api/semesters/:semesterId/courses/:courseId/addForLearning
+// GET SIGNED URL FOR LEARNING PDF (Bypasses Vercel 4.5MB limit)
 export const uploadCoursePdf = async (req, res, next) => {
   try {
     if (!req.file) {
@@ -333,18 +371,31 @@ export const uploadCoursePdf = async (req, res, next) => {
       });
     }
 
-    // Check size BEFORE processing to give a better error message
-    // 4.5MB = 4718592 bytes.
-    if (req.file.size > 4000000) { 
-        return res.status(413).json({
-            success: false,
-            error: "File too large for Vercel Free (Limit: 4MB)",
-            statusCode: 413
-        });
-    }
-
     const { semesterId, courseId } = req.params;
     const { title } = req.body;
+
+    // Use req.file.originalname here instead of 'fileName'
+    const fileExtension = req.file.originalname.split('.').pop();
+    const uniqueFileName = `${crypto.randomUUID()}.${fileExtension}`;
+    const filePath = `learning_pdfs/${uniqueFileName}`;
+
+    // Upload file buffer directly to Supabase Storage
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('uploads')
+      .upload(filePath, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: false
+      });
+
+    if (uploadError) {
+      throw new Error(`Supabase upload failed: ${uploadError.message}`);
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from('uploads')
+      .getPublicUrl(filePath);
+
+    const fileUrl = publicUrlData.publicUrl;
 
     const semester = await Semester.findOne({
       semesterNumber: semesterId,
@@ -355,71 +406,47 @@ export const uploadCoursePdf = async (req, res, next) => {
       return res.status(404).json({
         success: false,
         error: "Semester or Course not found",
+        statusCode: 404,
       });
     }
 
-    const folder = "semesters";
-
-    // Identify the specific course object to check for existing PDF
     const course = semester.courses.id(courseId);
     const existingDocId = course.pdfLearn;
 
-    // Construct the URL for the uploaded file
-    // LOCALLY (FOR LOCAL)
-    // const baseUrl = `http://localhost:${process.env.PORT || 5000}`;
-    // const fileUrl = `${baseUrl}/uploads/${folder}/${req.file.filename}`;
-
-    // WITH CLOUDINARY
-    const fileBase64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
-
-    // Upload to Cloudinary
-    const result = await cloudinary.uploader.upload(fileBase64, {
-      folder: "ai_learning_assistant", // Optional: organizes files in folders
-      resource_type: "auto", // Automatically detect if it's a PDF, Image, ect.
-    });
-
-    // Get the URL
-    const fileUrl = result.secure_url;
-
     let targetDoc;
 
-    // Update existing OR Create new
     if (existingDocId) {
-      // Update the existing document record
       targetDoc = await Document.findByIdAndUpdate(
         existingDocId,
         {
           title,
-          fileName: req.file.originalname,
+          fileName: req.file.originalname, // Corrected here too
           filePath: fileUrl,
           fileSize: req.file.size,
-          status: "processing", // Reset status for AI to re-process
+          status: "processing",
         },
         { new: true }
       );
     } 
 
-    // Create the Document if it doesn't exist yet
     if (!targetDoc) {
-    targetDoc = await Document.create({
-        userId: "698bea24e8e6702c5adca64f", //dummy -> Admin Uploaded it
+      targetDoc = await Document.create({
+        userId: req.user?._id || "698bea24e8e6702c5adca64f", 
         courseId: courseId,
         title,
-        fileName: req.file.originalname,
-        filePath: fileUrl, // store the URL instead of the local path
+        fileName: req.file.originalname, // Corrected here too
+        filePath: fileUrl,
         fileSize: req.file.size,
         status: "processing",
         docType: "public",
       });
     }
 
-    // Link it to the Semester
-    const updateResult = await Semester.updateOne(
+    await Semester.updateOne(
       { semesterNumber: semesterId, "courses._id": courseId },
       { $set: { "courses.$.pdfLearn": targetDoc._id } },
     );
 
-    // This keeps the Vercel function alive until the PDF is parsed
     await processPdf(targetDoc._id, fileUrl); 
 
     res.status(201).json({

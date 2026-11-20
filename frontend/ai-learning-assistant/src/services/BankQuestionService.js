@@ -65,21 +65,32 @@ const deleteCourse = async (semesterId, courseId) => {
   }
 };
 
-const uploadPdfs = async (semesterId, courseId, formData) => {
+// Request signed upload URLs from backend for multiple files
+export const uploadPdfs = async (semesterId, courseId, filesArray) => {
   try {
-    const response = await axiosInstance.post(API_PATHS.SEMESTER.UPLOAD_PDFS(semesterId, courseId),
-      formData,
-      {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      }
+    // We send an array of objects containing just the file names
+    const filePayload = filesArray.map(file => ({ fileName: file.name }));
+
+    const response = await axiosInstance.post(
+      API_PATHS.SEMESTER.GET_PDFS_UPLOAD_URLS(semesterId, courseId),
+      { files: filePayload }
     );
-
-    return response.data;
-
+    return response.data.data; // Returns array of { fileName, signedUrl, storagePath, fileUrl }
   } catch (error) {
-    throw error.response?.data || { message: "Upload failed!" };
+    throw error.response?.data || { message: "Failed to generate upload URLs" };
+  }
+};
+
+// Save the uploaded PDFs metadata to MongoDB
+export const savePdfsMetadata = async (semesterId, courseId, pdfsArray) => {
+  try {
+    const response = await axiosInstance.post(
+      API_PATHS.SEMESTER.SAVE_PDFS_METADATA(semesterId, courseId),
+      { pdfs: pdfsArray }
+    );
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || { message: "Failed to save PDFs metadata" };
   }
 };
 
