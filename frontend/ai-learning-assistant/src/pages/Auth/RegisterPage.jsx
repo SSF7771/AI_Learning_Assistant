@@ -64,7 +64,7 @@ const RegisterPage = () => {
           </div>
 
           {/* FORM */}
-          <div className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5">
             {/* USERNAME FIELD */}
             <div className="space-y-2">
               <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide">
@@ -160,7 +160,7 @@ const RegisterPage = () => {
 
             {/* SUBMIT BUTTON */}
             <button
-              onClick={handleSubmit}
+              type="submit"
               disabled={loading}
               className="group relative w-full h-12 bg-linear-to-r from-blue-500 to-teal-500 hover:from-blue-600 hover:to-teal-600 active:scale-[0.98] text-white text-sm font-semibold rounded-xl transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 shadow-lg shadow-blue-500/25 overflow-hidden"
             >
@@ -168,11 +168,11 @@ const RegisterPage = () => {
                 {loading ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Signing In...
+                    Registering...
                   </>
                 ) : (
                   <>
-                    Sign In
+                    Register
                     <ArrowRight
                       className="w-4 h-4 group-hover:translate-x-1 transition-transform duration-200"
                       strokeWidth={2.5}
@@ -182,7 +182,7 @@ const RegisterPage = () => {
               </span>
               <div className="absolute inset-0 bg-linear-to-r from-white/0 via-white/20 to-white/0 -translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
             </button>
-          </div>
+          </form>
 
           {/* FOOTER */}
           <div className="mt-8 pt-6 border-t border-slate-200/60">
