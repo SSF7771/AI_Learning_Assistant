@@ -363,52 +363,63 @@ export const deleteCourse = async (req, res, next) => {
 // GET SIGNED URL FOR LEARNING PDF (Bypasses Vercel 4.5MB limit)
 export const uploadCoursePdf = async (req, res, next) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: "Please upload a PDF File!",
-        statusCode: 400,
-      });
-    }
-
     const { semesterId, courseId } = req.params;
-    const { title } = req.body;
+    const { fileName, title } = req.body;
 
-    // Use req.file.originalname here instead of 'fileName'
-    const fileExtension = req.file.originalname.split('.').pop();
-    const uniqueFileName = `${crypto.randomUUID()}.${fileExtension}`;
-    const filePath = `learning_pdfs/${uniqueFileName}`;
-
-    // Upload file buffer directly to Supabase Storage
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('uploads')
-      .upload(filePath, req.file.buffer, {
-        contentType: req.file.mimetype,
-        upsert: false
-      });
-
-    if (uploadError) {
-      throw new Error(`Supabase upload failed: ${uploadError.message}`);
-    }
-
-    const { data: publicUrlData } = supabase.storage
-      .from('uploads')
-      .getPublicUrl(filePath);
-
-    const fileUrl = publicUrlData.publicUrl;
+    if (!fileName || !title) 
+      return res.status(400).json({ success: false, error: "File name and title are required" });
 
     const semester = await Semester.findOne({
       semesterNumber: semesterId,
       "courses._id": courseId,
     });
 
-    if (!semester) {
-      return res.status(404).json({
-        success: false,
-        error: "Semester or Course not found",
-        statusCode: 404,
-      });
+    if (!semester) 
+      return res.status(404).json({ success: false, error: "Semester or Course not found" });
+
+    // Generate unique storage path
+    const fileExtension = fileName.split('.').pop();
+    const uniqueFileName = `${crypto.randomUUID()}.${fileExtension}`;
+    const filePath = `learning_pdfs/${uniqueFileName}`;
+
+    // Create Supabase Signed Upload URL (Valid for 5 mins)
+    const { data, error } = await supabase.storage
+      .from('uploads')
+      .createSignedUploadUrl(filePath);
+
+    if (error) 
+      throw new Error(`Failed to generate upload URL: ${error.message}`);
+
+    const publicUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/uploads/${filePath}`;
+
+    res.status(200).json({
+      success: true,
+      signedUrl: data.signedUrl,  // Client uploads directly to this
+      path: filePath,
+      publicUrl: publicUrl,       // Client sends this back when finished
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Save Metadata & Trigger Processing (Called after direct upload to Supabase finishes)
+export const saveLearningPdfMetadata = async (req, res, next) => {
+  try {
+    const { semesterId, courseId } = req.params;
+    const { title, fileName, filePath, fileSize } = req.body;
+
+    if (!title || !filePath) {
+      return res.status(400).json({ success: false, error: "Title and file path are required" });
     }
+
+    const semester = await Semester.findOne({
+      semesterNumber: semesterId,
+      "courses._id": courseId,
+    });
+
+    if (!semester) 
+      return res.status(404).json({ success: false, error: "Semester or Course not found" });
 
     const course = semester.courses.id(courseId);
     const existingDocId = course.pdfLearn;
@@ -420,9 +431,9 @@ export const uploadCoursePdf = async (req, res, next) => {
         existingDocId,
         {
           title,
-          fileName: req.file.originalname, // Corrected here too
-          filePath: fileUrl,
-          fileSize: req.file.size,
+          fileName,
+          filePath, // Supabase public URL string
+          fileSize: fileSize || 0,
           status: "processing",
         },
         { new: true }
@@ -434,20 +445,22 @@ export const uploadCoursePdf = async (req, res, next) => {
         userId: req.user?._id || "698bea24e8e6702c5adca64f", 
         courseId: courseId,
         title,
-        fileName: req.file.originalname, // Corrected here too
-        filePath: fileUrl,
-        fileSize: req.file.size,
+        fileName,
+        filePath,
+        fileSize: fileSize || 0,
         status: "processing",
         docType: "public",
       });
     }
 
+    // Link it to the Semester course
     await Semester.updateOne(
       { semesterNumber: semesterId, "courses._id": courseId },
       { $set: { "courses.$.pdfLearn": targetDoc._id } },
     );
 
-    await processPdf(targetDoc._id, fileUrl); 
+    // Trigger your background parser safely using the public URL
+    await processPdf(targetDoc._id, filePath); 
 
     res.status(201).json({
       success: true,
