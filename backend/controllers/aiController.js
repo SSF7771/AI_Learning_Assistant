@@ -6,398 +6,415 @@ import * as geminiService from "../utils/geminiService.js";
 import { findRelevantChunks } from "../utils/textChunker.js";
 import ChatHistory from "../models/ChatHistory.js";
 
-// generateFlashCards -> Berfungsi untuk mengekstraksi poin-poin penting dari dokumen menggunakan Gemini AI 
+// generateFlashCards -> Berfungsi untuk mengekstraksi poin-poin penting dari dokumen menggunakan Gemini AI
 // dan mengubahnya menjadi pasangan tanya-jawab. Hasilnya disimpan ke dalam model FlashCard sebagai alat bantu hafalan (active recall).
-// generateQuiz -> Menggunakan AI untuk menyusun soal pilihan ganda berdasarkan isi dokumen. 
+// generateQuiz -> Menggunakan AI untuk menyusun soal pilihan ganda berdasarkan isi dokumen.
 // Soal-soal ini disimpan dalam model Quiz untuk menguji pemahaman user terhadap materi tersebut.
 // generateSummary -> Membuat ringkasan singkat dan padat dari keseluruhan teks dokumen.
 // Ringkasan ini biasanya digunakan untuk memperbarui atribut summary pada model Document agar user cepat memahami inti materi.
-// chat -> Mengelola interaksi tanya jawab antara user dan AI. 
-// Fungsi ini menggunakan findRelevantChunks untuk mencari konteks yang sesuai dalam dokumen, 
+// chat -> Mengelola interaksi tanya jawab antara user dan AI.
+// Fungsi ini menggunakan findRelevantChunks untuk mencari konteks yang sesuai dalam dokumen,
 // lalu menyimpan percakapannya ke dalam model ChatHistory.
-// explainConcept -> Fitur khusus untuk menjelaskan istilah atau bagian yang sulit dari dokumen dengan bahasa yang lebih sederhana 
+// explainConcept -> Fitur khusus untuk menjelaskan istilah atau bagian yang sulit dari dokumen dengan bahasa yang lebih sederhana
 // melalui bantuan AI, guna memperdalam pemahaman konsep tertentu secara spesifik.
-// getChatHistory -> Berfungsi untuk mengambil history percakapan yang tersimpan di model ChatHistory berdasarkan ID dokumen tertentu, 
+// getChatHistory -> Berfungsi untuk mengambil history percakapan yang tersimpan di model ChatHistory berdasarkan ID dokumen tertentu,
 // sehingga user dapat melihat kembali diskusi sebelumnya dengan AI.
 
 //Generate Flashcards from document
 export const generateFlashCards = async (req, res, next) => {
-    try {
-        const { documentId, count = 10 } = req.body;
-        const TOKEN_COST = 3;
+  try {
+    const { documentId, count = 10, topic = "" } = req.body;
+    const TOKEN_COST = 3;
 
-        if(!documentId) {
-            return res.status(400).json({
-                success: false,
-                error: "Please provide documentId!",
-                statusCode: 400
-            });
-        }
+    if (!documentId) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide documentId!",
+        statusCode: 400,
+      });
+    }
 
-        const user = await User.findById(req.user._id);
-        if (!user || user.tokens < TOKEN_COST) {
-            return res.status(403).json({
-                success: false,
-                error: `Insufficient tokens! You need at least ${TOKEN_COST} tokens to generate flashcards.`,
-                statusCode: 403
-            });
-        }
+    const user = await User.findById(req.user._id);
+    if (!user || user.tokens < TOKEN_COST) {
+      return res.status(403).json({
+        success: false,
+        error: `Insufficient tokens! You need at least ${TOKEN_COST} tokens to generate flashcards.`,
+        statusCode: 403,
+      });
+    }
 
-        const document = await Document.findOne({
-            _id: documentId,
-            // userId: req.user._id,
-            status: "ready",
-            $or: [
-                { userId: req.user._id }, // User owns it
-                { docType: "public" }      // It's a public learning material
-            ]
-        });
+    const document = await Document.findOne({
+      _id: documentId,
+      // userId: req.user._id,
+      status: "ready",
+      $or: [
+        { userId: req.user._id }, // User owns it
+        { docType: "public" }, // It's a public learning material
+      ],
+    });
 
-        if(!document) {
-            return res.status(404).json({
-                success: false,
-                error: "Document not found or not ready!",
-                statusCode: 404
-            });
-        }
+    if (!document) {
+      return res.status(404).json({
+        success: false,
+        error: "Document not found or not ready!",
+        statusCode: 404,
+      });
+    }
 
-        // Generate flashcards
-        const cards = await geminiService.generateFlashCards(
-            document.extractedText,
-            parseInt(count)
-        );
+    const cleanTopic = typeof topic === "string" ? topic.trim() : "";
 
-        const type = document.docType;
+    // Generate flashcards
+    const cards = await geminiService.generateFlashCards(
+      document.extractedText,
+      parseInt(count),
+      cleanTopic,
+    );
 
-        // Save to database
-        const flashcardSet = await FlashCard.create({
-            userId: req.user._id,
-            documentId: document._id,
-            cards: cards.map(card => ({
-                question: card.question,
-                answer: card.answer,
-                difficulty: card.difficulty,
-                reviewCount: 0,
-                isStarred: false
-            })),
-            flashType: type
-        });
+    const type = document.docType;
 
-        // Deduct tokens from user
-        await User.findByIdAndUpdate(req.user._id, {
-            $inc: { tokens: -TOKEN_COST }
-        });
+    // Save to database
+    const flashcardSet = await FlashCard.create({
+      userId: req.user._id,
+      documentId: document._id,
+      cards: cards.map((card) => ({
+        question: card.question,
+        answer: card.answer,
+        difficulty: card.difficulty,
+        reviewCount: 0,
+        isStarred: false,
+      })),
+      flashType: type,
+    });
 
-        res.status(201).json({
-            success: true,
-            data: flashcardSet,
-            message: "Flascards generated successfully!"
-        });
+    // Deduct tokens from user
+    await User.findByIdAndUpdate(req.user._id, {
+      $inc: { tokens: -TOKEN_COST },
+    });
 
-    } catch (error) {
-        next(error);
-    }  
+    res.status(201).json({
+      success: true,
+      data: flashcardSet,
+      message: "Flascards generated successfully!",
+    });
+  } catch (error) {
+    if (error.message.startsWith("No content found matching topic")) {
+      return res.status(404).json({
+        success: false,
+        message: error.message, // e.g. 'No content found matching topic: "quantum"'
+      });
+    }
+
+    next(error);
+  }
 };
 
 //Generate Quiz from document
 export const generateQuiz = async (req, res, next) => {
-    try {
-        const { documentId, numQuestions = 5, title } = req.body;
-        const TOKEN_COST = 5;
-        
-        if(!documentId) {
-            return res.status(400).json({
-                success: false,
-                error: "Please provide a documentId.",
-                statusCode: 400
-            });
-        }
+  try {
+    const { documentId, numQuestions = 5, topic = "" } = req.body;
+    const TOKEN_COST = 5;
 
-        const user = await User.findById(req.user._id);
-        if (!user || user.tokens < TOKEN_COST) {
-            return res.status(403).json({
-                success: false,
-                error: `Insufficient tokens! You need at least ${TOKEN_COST} tokens to generate flashcards.`,
-                statusCode: 403
-            });
-        }
+    if (!documentId) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide a documentId.",
+        statusCode: 400,
+      });
+    }
 
-        const document = await Document.findOne({
-            _id: documentId,
-            // userId: req.user._id,
-            status: "ready",
-            $or: [
-                { userId: req.user._id }, // User owns it
-                { docType: "public" }      // It's a public learning material
-            ]
-        });
+    const user = await User.findById(req.user._id);
+    if (!user || user.tokens < TOKEN_COST) {
+      return res.status(403).json({
+        success: false,
+        error: `Insufficient tokens! You need at least ${TOKEN_COST} tokens to generate flashcards.`,
+        statusCode: 403,
+      });
+    }
 
-        if(!document) {
-            return res.status(404).json({
-                success: false,
-                error: "Document not found or not ready!",
-                statusCode: 404
-            });
-        }
+    const document = await Document.findOne({
+      _id: documentId,
+      // userId: req.user._id,
+      status: "ready",
+      $or: [
+        { userId: req.user._id }, // User owns it
+        { docType: "public" }, // It's a public learning material
+      ],
+    });
 
-        // Generate quiz using AI (GEMINI)
-        const questions = await geminiService.generateQuiz(
-            document.extractedText,
-            parseInt(numQuestions)
-        );
+    if (!document) {
+      return res.status(404).json({
+        success: false,
+        error: "Document not found or not ready!",
+        statusCode: 404,
+      });
+    }
 
-        // Save to database
-        const quiz = await Quiz.create({
-            userId: req.user._id,
-            documentId: document._id,
-            title: title || `${document.title} - Quiz`,
-            questions: questions,
-            totalQuestions: questions.length,
-            userAnswers: [],
-            score: 0
-        });
+    const cleanTopic = typeof topic === "string" ? topic.trim() : "";
 
-        await User.findByIdAndUpdate(req.user._id, {
-            $inc: { tokens: -TOKEN_COST }
-        });
+    // Generate quiz using AI (GEMINI)
+    const questions = await geminiService.generateQuiz(
+      document.extractedText,
+      parseInt(numQuestions),
+      cleanTopic,
+    );
 
-        res.status(201).json({
-            success: true,
-            data: quiz,
-            message: "Quiz generated successfully!"
-        });
+    // Save to database
+    const quiz = await Quiz.create({
+      userId: req.user._id,
+      documentId: document._id,
+      title: `${document.title} - Quiz`,
+      questions: questions,
+      totalQuestions: questions.length,
+      userAnswers: [],
+      score: 0,
+    });
 
-    } catch (error) {
-        next(error);
-    }  
+    await User.findByIdAndUpdate(req.user._id, {
+      $inc: { tokens: -TOKEN_COST },
+    });
+
+    res.status(201).json({
+      success: true,
+      data: quiz,
+      message: "Quiz generated successfully!",
+    });
+  } catch (error) {
+    if (error.message.startsWith("No content found matching topic")) {
+      return res.status(404).json({
+        success: false,
+        message: error.message, // e.g. 'No content found matching topic: "quantum"'
+      });
+    }
+
+    next(error);
+  }
 };
 
 //Generate Document Summary
 export const generateSummary = async (req, res, next) => {
-    try {
-        const { documentId } = req.body;
+  try {
+    const { documentId } = req.body;
 
-        if(!documentId) {
-            return res.status(400).json({
-                success: false,
-                error: "Please provide a documentId.",
-                statusCode: 400
-            });
-        }
+    if (!documentId) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide a documentId.",
+        statusCode: 400,
+      });
+    }
 
-        const document = await Document.findOne({
-            _id: documentId,
-            // userId: req.user._id,
-            status: "ready",
-            $or: [
-                { userId: req.user._id }, // User owns it
-                { docType: "public" }      // It's a public learning material
-            ]
-        });
+    const document = await Document.findOne({
+      _id: documentId,
+      // userId: req.user._id,
+      status: "ready",
+      $or: [
+        { userId: req.user._id }, // User owns it
+        { docType: "public" }, // It's a public learning material
+      ],
+    });
 
-        if(!document) {
-            return res.status(404).json({
-                success: false,
-                error: "Document not found or not ready!",
-                statusCode: 404
-            });
-        }
+    if (!document) {
+      return res.status(404).json({
+        success: false,
+        error: "Document not found or not ready!",
+        statusCode: 404,
+      });
+    }
 
-        // Generate summary using AI (GEMINI)
-        const summary = await geminiService.generateSummary(document.extractedText);
+    // Generate summary using AI (GEMINI)
+    const summary = await geminiService.generateSummary(document.extractedText);
 
-        // Deduct tokens from user
-        // await User.findByIdAndUpdate(req.user._id, {
-        //     $inc: { tokens: -TOKEN_COST }
-        // });
+    // Deduct tokens from user
+    // await User.findByIdAndUpdate(req.user._id, {
+    //     $inc: { tokens: -TOKEN_COST }
+    // });
 
-        res.status(201).json({
-            success: true,
-            data: {
-                documentId: document._id,
-                title: document.title,
-                summary
-            },
-            message: "Summary generated successfully!"
-        });
-
-    } catch (error) {
-        next(error);
-    }  
+    res.status(201).json({
+      success: true,
+      data: {
+        documentId: document._id,
+        title: document.title,
+        summary,
+      },
+      message: "Summary generated successfully!",
+    });
+  } catch (error) {
+    next(error);
+  }
 };
 
 //Chat with Document
 export const chat = async (req, res, next) => {
-    try {
-        const { documentId, question } = req.body;
+  try {
+    const { documentId, question } = req.body;
 
-        if(!documentId || !question) {
-            return res.status(400).json({
-                success: false,
-                error: "Please provide a documentId and the question.",
-                statusCode: 400
-            });
-        }
+    if (!documentId || !question) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide a documentId and the question.",
+        statusCode: 400,
+      });
+    }
 
-        const document = await Document.findOne({
-            _id: documentId,
-            // userId: req.user._id,
-            status: "ready",
-            $or: [
-                { userId: req.user._id }, // User owns it
-                { docType: "public" }      // It's a public learning material
-            ]
-        });
+    const document = await Document.findOne({
+      _id: documentId,
+      // userId: req.user._id,
+      status: "ready",
+      $or: [
+        { userId: req.user._id }, // User owns it
+        { docType: "public" }, // It's a public learning material
+      ],
+    });
 
-        if(!document) {
-            return res.status(404).json({
-                success: false,
-                error: "Document not found or not ready!",
-                statusCode: 404
-            });
-        }
+    if (!document) {
+      return res.status(404).json({
+        success: false,
+        error: "Document not found or not ready!",
+        statusCode: 404,
+      });
+    }
 
-        // Find relevant chunks
-        const relevantChunks = findRelevantChunks(document.chunks, question, 5);
-        const chunkIndices = relevantChunks.map(c => c.chunkIndex);
+    // Find relevant chunks
+    const relevantChunks = findRelevantChunks(document.chunks, question, 5);
+    const chunkIndices = relevantChunks.map((c) => c.chunkIndex);
 
-        // Get or create chat history
-        let chatHistory = await ChatHistory.findOne({
-            userId: req.user._id,
-            documentId: document._id
-        });
+    // Get or create chat history
+    let chatHistory = await ChatHistory.findOne({
+      userId: req.user._id,
+      documentId: document._id,
+    });
 
-        if(!chatHistory) {
-            chatHistory = await ChatHistory.create({
-                userId: req.user._id,
-                documentId: document._id,
-                messages: []
-            });
-        }
+    if (!chatHistory) {
+      chatHistory = await ChatHistory.create({
+        userId: req.user._id,
+        documentId: document._id,
+        messages: [],
+      });
+    }
 
-        // Generate response using AI (GEMINI)
-        const answer = await geminiService.chatWithContext(question, relevantChunks);
+    // Generate response using AI (GEMINI)
+    const answer = await geminiService.chatWithContext(
+      question,
+      relevantChunks,
+    );
 
-        // Save conversation
-        chatHistory.messages.push(
-            {
-                role: 'user',
-                content: question,
-                timestamp: new Date(),
-                relevantChunks: []
-            },
-            {
-                role: 'assistant',
-                content: answer,
-                timestamp: new Date(),
-                relevantChunks: chunkIndices
-            }
-        );
+    // Save conversation
+    chatHistory.messages.push(
+      {
+        role: "user",
+        content: question,
+        timestamp: new Date(),
+        relevantChunks: [],
+      },
+      {
+        role: "assistant",
+        content: answer,
+        timestamp: new Date(),
+        relevantChunks: chunkIndices,
+      },
+    );
 
-        await chatHistory.save();
+    await chatHistory.save();
 
-        res.status(200).json({
-            success: true,
-            data: {
-                question,
-                answer,
-                relevantChunks: chunkIndices,
-                chatHistoryId: chatHistory._id
-            },
-            message: "Response generated successfully!"
-        });
-
-    } catch (error) {
-        next(error);
-    }  
+    res.status(200).json({
+      success: true,
+      data: {
+        question,
+        answer,
+        relevantChunks: chunkIndices,
+        chatHistoryId: chatHistory._id,
+      },
+      message: "Response generated successfully!",
+    });
+  } catch (error) {
+    next(error);
+  }
 };
 
 //Explain concept from document
 export const explainConcept = async (req, res, next) => {
-    try {
-        const { documentId, concept } = req.body;
+  try {
+    const { documentId, concept } = req.body;
 
-        if(!documentId || !concept) {
-            return res.status(400).json({
-                success: false,
-                error: "Please provide a documentId and the concept.",
-                statusCode: 400
-            });
-        }
+    if (!documentId || !concept) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide a documentId and the concept.",
+        statusCode: 400,
+      });
+    }
 
-        const document = await Document.findOne({
-            _id: documentId,
-            // userId: req.user._id,
-            status: "ready",
-            $or: [
-                { userId: req.user._id }, // User owns it
-                { docType: "public" }      // It's a public learning material
-            ]
-        });
+    const document = await Document.findOne({
+      _id: documentId,
+      // userId: req.user._id,
+      status: "ready",
+      $or: [
+        { userId: req.user._id }, // User owns it
+        { docType: "public" }, // It's a public learning material
+      ],
+    });
 
-        if(!document) {
-            return res.status(404).json({
-                success: false,
-                error: "Document not found or not ready!",
-                statusCode: 404
-            });
-        }
+    if (!document) {
+      return res.status(404).json({
+        success: false,
+        error: "Document not found or not ready!",
+        statusCode: 404,
+      });
+    }
 
-         // Find relevant chunks
-        const relevantChunks = findRelevantChunks(document.chunks, concept, 3);
-        const context = relevantChunks.map(c => c.content).join("\n\n");
+    // Find relevant chunks
+    const relevantChunks = findRelevantChunks(document.chunks, concept, 3);
+    const context = relevantChunks.map((c) => c.content).join("\n\n");
 
-        // Generate explanation using AI (GEMINI)
-        const explanation = await geminiService.explainConcept(concept, context);
+    // Generate explanation using AI (GEMINI)
+    const explanation = await geminiService.explainConcept(concept, context);
 
-        res.status(200).json({
-            success: true,
-            data: {
-                concept,
-                explanation,
-                relevantChunks: relevantChunks.map(c => c.chunkIndex)
-            },
-            message: "Explanation generated successfully!"
-        })
-
-    } catch (error) {
-        next(error);
-    }  
+    res.status(200).json({
+      success: true,
+      data: {
+        concept,
+        explanation,
+        relevantChunks: relevantChunks.map((c) => c.chunkIndex),
+      },
+      message: "Explanation generated successfully!",
+    });
+  } catch (error) {
+    next(error);
+  }
 };
 
 //Get Chat History for a document
 export const getChatHistory = async (req, res, next) => {
-    try {
-        const { documentId } = req.params;
+  try {
+    const { documentId } = req.params;
 
-        if(!documentId) {
-            return res.status(400).json({
-                success: false,
-                error: "Please provide a documentId and the concept.",
-                statusCode: 400
-            });
-        }
+    if (!documentId) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide a documentId and the concept.",
+        statusCode: 400,
+      });
+    }
 
-        const chatHistory = await ChatHistory.findOne({
-            userId: req.user._id,
-            documentId: documentId
-        }).select("messages"); // ONLY RETRIEVE THE MESSAGES THAT ARE IN THE ARRAY
+    const chatHistory = await ChatHistory.findOne({
+      userId: req.user._id,
+      documentId: documentId,
+    }).select("messages"); // ONLY RETRIEVE THE MESSAGES THAT ARE IN THE ARRAY
 
-        if(!chatHistory) {
-            return res.status(200).json({
-                success: true,
-                data: [],   // Return an empty array if no chat history found
-                message: "No chat history found for this document!",
-            });
-        }
+    if (!chatHistory) {
+      return res.status(200).json({
+        success: true,
+        data: [], // Return an empty array if no chat history found
+        message: "No chat history found for this document!",
+      });
+    }
 
-        res.status(200).json({
-            success: true,
-            data: chatHistory.messages,
-            message: "Chat history retrieved successfully!",
-        });
-        
-    } catch (error) {
-        next(error);
-    }  
+    res.status(200).json({
+      success: true,
+      data: chatHistory.messages,
+      message: "Chat history retrieved successfully!",
+    });
+  } catch (error) {
+    next(error);
+  }
 };

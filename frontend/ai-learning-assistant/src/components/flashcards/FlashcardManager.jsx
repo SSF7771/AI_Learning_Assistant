@@ -32,6 +32,7 @@ const FlashcardManager = ({ documentId }) => {
   const [toDelete, setToDelete] = useState(null);
   // For the quantity of cards
   const [count, setCount] = useState(10);
+  const [topic, setTopic] = useState("");
   const { user, refreshProfile } = useAuth();
 
   const fetchFlashcardSets = async () => {
@@ -66,7 +67,7 @@ const FlashcardManager = ({ documentId }) => {
     setGenerating(true);
 
     try {
-      await aiService.generateFlashcards(documentId, { count });
+      await aiService.generateFlashcards(documentId, { count, topic });
 
       await refreshProfile();
 
@@ -374,6 +375,20 @@ const FlashcardManager = ({ documentId }) => {
               }
               min="1"
               required
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-neutral-700 mb-1.5">
+              Topic / Keywords{" "}
+              <span className="text-neutral-400 font-normal">(Optional)</span>
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. photosynthesis, EDA (leave blank for all topics)"
+              className="w-full h-9 px-3 border border-neutral-200 rounded-lg bg-white text-sm text-neutral-900 placeholder-neutral-400 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-[#00d492] focus:border-transparent"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
             />
           </div>
 
