@@ -171,7 +171,20 @@ export const submitQuiz = async (req, res, next) => {
         let correctCount = 0;
         const userAnswers = [];
 
-        const normalize = str => str?.replace(/^O\d+:\s*/, "").trim().toLowerCase();
+        const normalize = (str, options = []) => {
+            if (!str) return "";
+            const trimmed = str.trim();
+
+            // If stored as "O3" or "Option 3", resolve it to the actual option text
+            const labelMatch = trimmed.match(/^(?:O|Option\s*)([1-4])(?:\s*[:.)-]?\s*)?$/i);
+            if (labelMatch && options.length === 4) {
+                const idx = parseInt(labelMatch[1], 10) - 1;
+                if (options[idx]) return options[idx].trim().toLowerCase();
+            }
+
+            // Strip any "O3: " prefix if present
+            return trimmed.replace(/^(?:O|Option\s*)\d+\s*[:.)-]\s*/i, "").trim().toLowerCase();
+        };
 
         answers.forEach(answer => {
             const { questionIdx, selectedAnswer } = answer;
