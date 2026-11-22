@@ -1,113 +1,208 @@
 /**
- * Split text into chunks for better AI processing
- * @param {string} text - Full text to chunk
- * @param {number} chunkSize - Target size per chunk (in words)
- * @param {number} overLap - Number of words to overlap between chunks
- * @returns {Array<{content: string, chunkIndex: number, pageNumber: number}>}
+ * Clean text while preserving single/double newlines
+ * @param {string} rawText
+ * @returns {string}
  */
-
-export const chunkText = (text, chunkSize = 500, overLap = 50) => {
-  if (!text || text.trim().length === 0) return [];
-
-  // Clean text while preserving paragraph structure
-  const cleanedText = text
+const cleanTextPreserveStructure = (rawText) => {
+  return rawText
     .replace(/\r\n/g, "\n")
-    .replace(/\s+/g, " ")
-    .replace(/\n /g, "\n")
-    .replace(/ \n/g, "\n")
+    .replace(/[^\S\n]+/g, " ") // Collapse spaces/tabs, keep \n
+    .replace(/ *\n */g, "\n")  // Trim spaces around newlines
+    .replace(/\n{3,}/g, "\n\n") // Collapse 3+ newlines to 2
     .trim();
+};
 
-  // Try to split by paragraphs (single or double newlines)
-  const paragraphs = cleanedText
-    .split(/\n+/)
-    .filter(p => p.trim().length > 0);
+/**
+ * Split oversized text by sentences first, falling back to words
+ * @param {string} text
+ * @param {number} chunkSize
+ * @param {number} overlap
+ * @returns {string[]}
+ */
+const splitLargeBlock = (text, chunkSize, overlap) => {
+  const sentences = text.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) || [text];
+  const result = [];
+  let currentWords = [];
 
-  const chunks = [];
-  let currentChunk = [];
-  let currentWordCount = 0;
-  let chunkIndex = 0;
+  for (const sentence of sentences) {
+    const sentenceWords = sentence.trim().split(/\s+/).filter(Boolean);
 
-  for (const paragraph of paragraphs) {
-    const paragraphWords = paragraph.trim().split(/\s+/);
-    const paragraphWordCount = paragraphWords.length;
-
-    // If single paragraph exceeds chunk size, split it by words
-    if (paragraphWordCount > chunkSize) {
-      if (currentChunk.length > 0) {
-        chunks.push({
-          content: currentChunk.join("\n\n"),
-          chunkIndex: chunkIndex++,
-          pageNumber: 0,
-        });
-
-        currentChunk = [];
-        currentWordCount = 0;
+    // Single sentence exceeds chunkSize -> split by words
+    if (sentenceWords.length > chunkSize) {
+      if (currentWords.length > 0) {
+        result.push(currentWords.join(" "));
+        currentWords = [];
       }
-
-      // Split large paragraph into word-based chunks
-      for (let i = 0; i < paragraphWords.length; i += (chunkSize - overLap)) {
-        const chunkWords = paragraphWords.slice(i, i + chunkSize);
-        chunks.push({
-          content: chunkWords.join(" "),
-          chunkIndex: chunkIndex++,
-          pageNumber: 0,
-        });
-
-        if (i + chunkSize >= paragraphWords.length) break;
+      for (let i = 0; i < sentenceWords.length; i += chunkSize - overlap) {
+        result.push(sentenceWords.slice(i, i + chunkSize).join(" "));
+        if (i + chunkSize >= sentenceWords.length) break;
       }
       continue;
     }
 
-    // If adding this paragraph exceeds chunk size, save current chunk
-    if (
-      currentWordCount + paragraphWordCount > chunkSize &&
-      currentChunk.length > 0
-    ) {
-      chunks.push({
-        content: currentChunk.join("\n\n"),
-        chunkIndex: chunkIndex++,
-        pageNumber: 0,
-      });
-
-      // Create overlap from previous chunk
-      const prevChunkText = currentChunk.join(" ");
-      const prevWords = prevChunkText.split(/\s+/);
-      const overlapText = prevWords
-        .slice(-Math.min(overLap, prevWords.length))
-        .join(" ");
-
-      currentChunk = [overlapText, paragraph.trim()];
-      currentWordCount = overlapText.split(/\s+/).length + paragraphWordCount;
+    if (currentWords.length + sentenceWords.length > chunkSize && currentWords.length > 0) {
+      result.push(currentWords.join(" "));
+      const overlapWords = overlap > 0 ? currentWords.slice(-overlap) : [];
+      currentWords = [...overlapWords, ...sentenceWords];
     } else {
-      // Add Paragraph to current chunk
-      currentChunk.push(paragraph.trim());
-      currentWordCount += paragraphWordCount;
-    }
-
-    // Add the last chunk
-    if (currentChunk.length > 0) {
-      chunks.push({
-        content: currentChunk.join("\n\n"),
-        chunkIndex: chunkIndex,
-        pageNumber: 0,
-      });
-    }
-
-    // Fallback: if no chunks created, split by words
-    if (chunks.length === 0 && cleanedText.length > 0) {
-      const allWords = cleanedText.split(/\s+/);
-      for (let i = 0; i < allWords.length; i += (chunkSize - overLap)) {
-        const chunkWords = allWords.slice(i, i + chunkSize);
-        chunks.push({
-          content: chunkWords.join(" "),
-          chunkIndex: chunkIndex++,
-          pageNumber: 0,
-        });
-      }
-
-      if (i + chunkSize >= allWords.length) break;
+      currentWords.push(...sentenceWords);
     }
   }
+
+  if (currentWords.length > 0) {
+    result.push(currentWords.join(" "));
+  }
+
+  return result;
+};
+
+/**
+ * Split text or pages into chunks while tracking page numbers
+ * @param {string | Array<{pageNumber: number, text: string}>} input
+ * @param {number} chunkSize - Target size per chunk (in words)
+ * @param {number} overLap - Number of words to overlap between chunks
+ * @returns {Array<{content: string, chunkIndex: number, pageNumber: number, pageNumbers: number[]}>}
+ */
+export const chunkText = (input, chunkSize = 500, overLap = 50) => {
+  if (!input) return [];
+
+  // Prevent invalid sizes / infinite loops
+  const safeChunkSize = Math.max(1, chunkSize);
+  const safeOverlap = Math.max(0, Math.min(overLap, safeChunkSize - 1));
+
+  // Normalize input into [{ pageNumber, text }]
+  let pages = [];
+  if (typeof input === "string") {
+    if (input.trim().length === 0) return [];
+    // Split on PDF form-feed (\f) if present; otherwise treat as page 1
+    pages = input.split("\f").map((pageText, idx) => ({
+      pageNumber: idx + 1,
+      text: pageText,
+    }));
+  } else if (Array.isArray(input)) {
+    pages = input.map((p, idx) => ({
+      pageNumber: p.pageNumber ?? idx + 1,
+      text: p.text ?? "",
+    }));
+  }
+
+  // Extract paragraphs while keeping each paragraph's pageNumber
+  const paragraphs = [];
+  for (const page of pages) {
+    const cleaned = cleanTextPreserveStructure(page.text);
+    if (!cleaned) continue;
+
+    for (const p of cleaned.split(/\n+/)) {
+      const trimmed = p.trim();
+      if (trimmed.length > 0) {
+        paragraphs.push({ text: trimmed, pageNumber: page.pageNumber });
+      }
+    }
+  }
+
+  if (paragraphs.length === 0) return [];
+
+  const chunks = [];
+  let currentSegments = []; // { text, pageNumber, isOverlap }
+  let currentWordCount = 0;
+  let chunkIndex = 0;
+
+  const flushCurrentChunk = () => {
+    if (currentSegments.length === 0) return;
+
+    // Primary page = first non-overlap segment's page (falls back to first segment)
+    const primarySegment =
+      currentSegments.find((s) => !s.isOverlap) || currentSegments[0];
+
+    const pageNumbers = [
+      ...new Set(currentSegments.map((s) => s.pageNumber)),
+    ];
+
+    chunks.push({
+      content: currentSegments.map((s) => s.text).join("\n\n"),
+      chunkIndex: chunkIndex++,
+      pageNumber: primarySegment.pageNumber,
+      pageNumbers, // Useful if a chunk spans multiple pages
+    });
+  };
+
+  for (const paragraph of paragraphs) {
+    const paragraphWords = paragraph.text.split(/\s+/);
+    const paragraphWordCount = paragraphWords.length;
+
+    // Case 1: Single paragraph exceeds chunkSize -> split by sentences/words
+    if (paragraphWordCount > safeChunkSize) {
+      flushCurrentChunk();
+      currentSegments = [];
+      currentWordCount = 0;
+
+      const subChunks = splitLargeBlock(
+        paragraph.text,
+        safeChunkSize,
+        safeOverlap
+      );
+      for (const content of subChunks) {
+        chunks.push({
+          content,
+          chunkIndex: chunkIndex++,
+          pageNumber: paragraph.pageNumber,
+          pageNumbers: [paragraph.pageNumber],
+        });
+      }
+      continue;
+    }
+
+    // Case 2: Adding paragraph exceeds chunkSize -> flush & start new chunk with overlap
+    if (
+      currentWordCount + paragraphWordCount > safeChunkSize &&
+      currentSegments.length > 0
+    ) {
+      flushCurrentChunk();
+
+      let nextSegments = [];
+      let overlapWordCount = 0;
+
+      if (safeOverlap > 0) {
+        const lastSegment = currentSegments[currentSegments.length - 1];
+        const prevWords = currentSegments
+          .map((s) => s.text)
+          .join(" ")
+          .split(/\s+/);
+        const overlapWords = prevWords.slice(
+          -Math.min(safeOverlap, prevWords.length)
+        );
+
+        if (overlapWords.length > 0) {
+          nextSegments.push({
+            text: overlapWords.join(" "),
+            pageNumber: lastSegment.pageNumber,
+            isOverlap: true,
+          });
+          overlapWordCount = overlapWords.length;
+        }
+      }
+
+      nextSegments.push({
+        text: paragraph.text,
+        pageNumber: paragraph.pageNumber,
+        isOverlap: false,
+      });
+
+      currentSegments = nextSegments;
+      currentWordCount = overlapWordCount + paragraphWordCount;
+    } else {
+      // Case 3: Fits into current chunk
+      currentSegments.push({
+        text: paragraph.text,
+        pageNumber: paragraph.pageNumber,
+        isOverlap: false,
+      });
+      currentWordCount += paragraphWordCount;
+    }
+  }
+
+  // Flush the final remaining chunk (outside the loop!)
+  flushCurrentChunk();
 
   return chunks;
 };

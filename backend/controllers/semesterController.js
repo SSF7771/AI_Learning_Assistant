@@ -4,10 +4,10 @@ import path from "path";
 import { extractTextFromPDF } from "../utils/pdfParser.js";
 import { chunkText } from "../utils/textChunker.js";
 // import cloudinary from "../config/cloudinary.js";
-import { supabase } from '../config/supabase.js'; // Adjust path as needed
-import crypto from 'crypto';
+import { supabase } from "../config/supabase.js"; // Adjust path as needed
+import crypto from "crypto";
 
-// createSemester -> Membuat entitas semester baru (misalnya Semester 1, 2, dst.) 
+// createSemester -> Membuat entitas semester baru (misalnya Semester 1, 2, dst.)
 // ke dalam model Semester sebagai wadah utama organisasi mata kuliah.
 // getAllSemesters -> Mengambil seluruh daftar semester yang tersedia untuk ditampilkan pada menu navigasi utama aplikasi.
 // getSemesterByNumber -> Mencari dan menampilkan detail satu semester tertentu berdasarkan urutan angkanya.
@@ -16,9 +16,9 @@ import crypto from 'crypto';
 // deleteCourse -> Menghapus mata kuliah beserta seluruh data terkait dari database semester.
 // uploadPdfs -> Mengelola unggahan banyak file PDF sekaligus (maksimal 5) ke dalam suatu mata kuliah; biasanya digunakan untuk mengisi konten pada fitur Bank Soal (Question Bank).
 // deletePdf -> Menghapus satu file PDF spesifik dari daftar dokumen mata kuliah dan membersihkan file fisiknya melalui fs.
-// uploadCoursePdf -> Mengunggah satu file PDF khusus yang akan digunakan sebagai materi utama pada fitur Learning Portal, 
+// uploadCoursePdf -> Mengunggah satu file PDF khusus yang akan digunakan sebagai materi utama pada fitur Learning Portal,
 // termasuk melakukan ekstraksi teks dan chunking untuk keperluan AI.
-// getSemesterFile -> Mengambil data materi pembelajaran yang sudah diunggah di Portal Belajar agar dapat diakses kembali oleh user 
+// getSemesterFile -> Mengambil data materi pembelajaran yang sudah diunggah di Portal Belajar agar dapat diakses kembali oleh user
 // untuk dipelajari.
 
 // @desc    Create a new Semester
@@ -172,16 +172,18 @@ export const uploadPdfs = async (req, res, next) => {
 
     // Generate signed upload URLs in parallel for all files
     const urlPromises = files.map(async (file) => {
-      const fileExtension = file.fileName.split('.').pop();
+      const fileExtension = file.fileName.split(".").pop();
       const uniqueFileName = `${crypto.randomUUID()}.${fileExtension}`;
       const filePath = `pdfs/${uniqueFileName}`;
 
       const { data, error } = await supabase.storage
-        .from('uploads')
+        .from("uploads")
         .createSignedUploadUrl(filePath);
 
       if (error) {
-        throw new Error(`Failed to generate upload URL for ${file.fileName}: ${error.message}`);
+        throw new Error(
+          `Failed to generate upload URL for ${file.fileName}: ${error.message}`,
+        );
       }
 
       const publicUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/uploads/${filePath}`;
@@ -190,7 +192,7 @@ export const uploadPdfs = async (req, res, next) => {
         fileName: file.fileName,
         signedUrl: data.signedUrl,
         storagePath: filePath,
-        fileUrl: publicUrl
+        fileUrl: publicUrl,
       };
     });
 
@@ -245,7 +247,7 @@ export const savePdfsMetadata = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: updatedSemester,
-      message: "PDFs added successfully!"
+      message: "PDFs added successfully!",
     });
   } catch (error) {
     next(error);
@@ -289,12 +291,12 @@ export const deletePdf = async (req, res, next) => {
     try {
       // Delete from Supabase Storage
       // Extract it dynamically from the public fileUrl string
-      const urlParts = pdf.fileUrl.split('/uploads/');
+      const urlParts = pdf.fileUrl.split("/uploads/");
       if (urlParts.length > 1) {
         const filePath = urlParts[1]; // e.g., "pdfs/uuid.pdf"
 
         const { error: storageError } = await supabase.storage
-          .from('uploads')
+          .from("uploads")
           .remove([filePath]);
 
         if (storageError) {
@@ -366,37 +368,41 @@ export const uploadCoursePdf = async (req, res, next) => {
     const { semesterId, courseId } = req.params;
     const { fileName, title } = req.body;
 
-    if (!fileName || !title) 
-      return res.status(400).json({ success: false, error: "File name and title are required" });
+    if (!fileName || !title)
+      return res
+        .status(400)
+        .json({ success: false, error: "File name and title are required" });
 
     const semester = await Semester.findOne({
       semesterNumber: semesterId,
       "courses._id": courseId,
     });
 
-    if (!semester) 
-      return res.status(404).json({ success: false, error: "Semester or Course not found" });
+    if (!semester)
+      return res
+        .status(404)
+        .json({ success: false, error: "Semester or Course not found" });
 
     // Generate unique storage path
-    const fileExtension = fileName.split('.').pop();
+    const fileExtension = fileName.split(".").pop();
     const uniqueFileName = `${crypto.randomUUID()}.${fileExtension}`;
     const filePath = `learning_pdfs/${uniqueFileName}`;
 
     // Create Supabase Signed Upload URL (Valid for 5 mins)
     const { data, error } = await supabase.storage
-      .from('uploads')
+      .from("uploads")
       .createSignedUploadUrl(filePath);
 
-    if (error) 
+    if (error)
       throw new Error(`Failed to generate upload URL: ${error.message}`);
 
     const publicUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/uploads/${filePath}`;
 
     res.status(200).json({
       success: true,
-      signedUrl: data.signedUrl,  // Client uploads directly to this
+      signedUrl: data.signedUrl, // Client uploads directly to this
       path: filePath,
-      publicUrl: publicUrl,       // Client sends this back when finished
+      publicUrl: publicUrl, // Client sends this back when finished
     });
   } catch (error) {
     next(error);
@@ -410,7 +416,9 @@ export const saveLearningPdfMetadata = async (req, res, next) => {
     const { title, fileName, filePath, fileSize } = req.body;
 
     if (!title || !filePath) {
-      return res.status(400).json({ success: false, error: "Title and file path are required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "Title and file path are required" });
     }
 
     const semester = await Semester.findOne({
@@ -418,8 +426,10 @@ export const saveLearningPdfMetadata = async (req, res, next) => {
       "courses._id": courseId,
     });
 
-    if (!semester) 
-      return res.status(404).json({ success: false, error: "Semester or Course not found" });
+    if (!semester)
+      return res
+        .status(404)
+        .json({ success: false, error: "Semester or Course not found" });
 
     const course = semester.courses.id(courseId);
     const existingDocId = course.pdfLearn;
@@ -436,13 +446,13 @@ export const saveLearningPdfMetadata = async (req, res, next) => {
           fileSize: fileSize || 0,
           status: "processing",
         },
-        { new: true }
+        { new: true },
       );
-    } 
+    }
 
     if (!targetDoc) {
       targetDoc = await Document.create({
-        userId: req.user?._id || "698bea24e8e6702c5adca64f", 
+        userId: req.user?._id || "698bea24e8e6702c5adca64f",
         courseId: courseId,
         title,
         fileName,
@@ -460,12 +470,14 @@ export const saveLearningPdfMetadata = async (req, res, next) => {
     );
 
     // Trigger your background parser safely using the public URL
-    await processPdf(targetDoc._id, filePath); 
+    await processPdf(targetDoc._id, filePath);
 
     res.status(201).json({
       success: true,
       data: targetDoc,
-      message: existingDocId ? "Document updated successfully..." : "Document created successfully. Processing in progress..",
+      message: existingDocId
+        ? "Document updated successfully..."
+        : "Document created successfully. Processing in progress..",
     });
   } catch (error) {
     next(error);
@@ -475,19 +487,28 @@ export const saveLearningPdfMetadata = async (req, res, next) => {
 // Helper FUNCTION for process PDF
 const processPdf = async (documentId, fileUrl) => {
   try {
-    const { text } = await extractTextFromPDF(fileUrl);
+    const { text, pages, numPages } = await extractTextFromPDF(fileUrl);
 
-    // Create chunks
-    const chunks = chunkText(text, 500, 50);
+    if (!text || text.trim().length === 0) {
+      throw new Error(
+        "No extractable text found in PDF (it may be scanned/image-only).",
+      );
+    }
+
+    // Pass `pages` instead of `text` so pageNumber is tracked accurately
+    const chunks = chunkText(pages, 500, 50);
 
     // Update document
     await Document.findByIdAndUpdate(documentId, {
       extractedText: text,
       chunks: chunks,
+      // totalPages: numPages, // Optional: if your schema has a page count field
       status: "ready",
     });
 
-    console.log(`Document ${documentId} processed successfully!`);
+    console.log(
+      `Document ${documentId} processed successfully (${chunks.length} chunks across ${numPages} pages)!`,
+    );
   } catch (error) {
     console.error(`Error processing document ${documentId}: `, error);
 
@@ -506,18 +527,17 @@ export const getSemesterFile = async (req, res, next) => {
     const semester = await Semester.findOne({
       semesterNumber: semesterId,
     }).populate({
-      path: "courses.pdfLearn",   // This converts the ID into the actual Document object
-      model: 'Document'
-    }); 
-
-    if (!semester) 
-      return res.status(404).json({ success: false, message: "Not found" });
-
-    res.status(200).json({ 
-      success: true, 
-      data: semester 
+      path: "courses.pdfLearn", // This converts the ID into the actual Document object
+      model: "Document",
     });
 
+    if (!semester)
+      return res.status(404).json({ success: false, message: "Not found" });
+
+    res.status(200).json({
+      success: true,
+      data: semester,
+    });
   } catch (error) {
     next(error);
   }
