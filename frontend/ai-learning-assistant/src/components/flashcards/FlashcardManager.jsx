@@ -57,7 +57,7 @@ const FlashcardManager = ({ documentId }) => {
 
   const handleGenerateFlashcards = async (e) => {
     e.preventDefault();
-    const TOKEN_COST = 3;
+    const TOKEN_COST = 10;
 
     if ((user?.tokens || 0) < TOKEN_COST) {
       toast.error("Not enough tokens! Please top up to continue.");
@@ -71,7 +71,7 @@ const FlashcardManager = ({ documentId }) => {
 
       await refreshProfile();
 
-      toast.success("Flashcards generated successfully! (-3 tokens)");
+      toast.success("Flashcards generated successfully! (-10 tokens)");
       setGenerateModalOpen(false);
       fetchFlashcardSets();
     } catch (error) {
@@ -266,7 +266,7 @@ const FlashcardManager = ({ documentId }) => {
               </span>
 
               <span className="flex items-center gap-1 text-sm font-medium text-blue-100/90 mt-0.5">
-                <Coins size={13} strokeWidth={2.5} color="orange" />3 tokens
+                <Coins size={13} strokeWidth={2.5} color="orange" />10 tokens
               </span>
             </div>
           </button>
@@ -296,7 +296,7 @@ const FlashcardManager = ({ documentId }) => {
               </span>
 
               <span className="flex items-center gap-1 text-sm font-medium text-blue-100/90 mt-0.5">
-                <Coins size={13} strokeWidth={2.5} color="orange" />3 tokens
+                <Coins size={13} strokeWidth={2.5} color="orange" />10 tokens
               </span>
             </div>
           </Button>
@@ -395,7 +395,7 @@ const FlashcardManager = ({ documentId }) => {
           <div className="text-xs text-neutral-500 flex items-center gap-1">
             <span>This action will cost</span>
             <span className="font-semibold text-neutral-800 flex items-center gap-0.5">
-              <Coins size={12} color="orange" /> 3 tokens
+              <Coins size={12} color="orange" /> 10 tokens
             </span>
             <span>(You have {user?.tokens || 0})</span>
           </div>

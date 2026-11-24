@@ -46,7 +46,7 @@ const QuizManager = ({ documentId }) => {
 
   const handleGenerateQuiz = async (e) => {
     e.preventDefault();
-    const TOKEN_COST = 5;
+    const TOKEN_COST = 15;
 
     if ((user?.tokens || 0) < TOKEN_COST) {
       toast.error("Not enough tokens! Please top up to continue.");
@@ -60,7 +60,7 @@ const QuizManager = ({ documentId }) => {
 
       await refreshProfile();
 
-      toast.success("Quiz generated successfully! (-5 tokens)");
+      toast.success("Quiz generated successfully! (-115 tokens)");
       setGenerateModalOpen(false);
       fetchQuizzes();
     } catch (error) {
@@ -127,7 +127,7 @@ const QuizManager = ({ documentId }) => {
             </span>
 
             <span className="flex items-center gap-1 text-sm font-medium text-blue-100/90 mt-0.5">
-              <Coins size={13} strokeWidth={2.5} color="orange" />5 tokens
+              <Coins size={13} strokeWidth={2.5} color="orange" />15 tokens
             </span>
           </div>
         </Button>
@@ -175,7 +175,7 @@ const QuizManager = ({ documentId }) => {
           <div className="text-xs text-neutral-500 flex items-center gap-1">
             <span>This action will cost</span>
             <span className="font-semibold text-neutral-800 flex items-center gap-0.5">
-              <Coins size={12} color="orange" /> 5 tokens
+              <Coins size={12} color="orange" /> 15 tokens
             </span>
             <span>(You have {user?.tokens || 0})</span>
           </div>

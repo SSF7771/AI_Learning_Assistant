@@ -24,7 +24,7 @@ import ChatHistory from "../models/ChatHistory.js";
 export const generateFlashCards = async (req, res, next) => {
   try {
     const { documentId, count = 10, topic = "" } = req.body;
-    const TOKEN_COST = 3;
+    const TOKEN_COST = 10;
 
     if (!documentId) {
       return res.status(400).json({
@@ -112,7 +112,7 @@ export const generateFlashCards = async (req, res, next) => {
 export const generateQuiz = async (req, res, next) => {
   try {
     const { documentId, numQuestions = 5, topic = "" } = req.body;
-    const TOKEN_COST = 5;
+    const TOKEN_COST = 15;
 
     if (!documentId) {
       return res.status(400).json({

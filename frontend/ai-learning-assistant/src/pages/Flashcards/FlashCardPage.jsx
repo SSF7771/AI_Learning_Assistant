@@ -56,7 +56,7 @@ const FlashCardPage = () => {
   }, [documentId]);
 
   const handleGenerateFlashcards = async () => {
-    const TOKEN_COST = 3;
+    const TOKEN_COST = 10;
 
     if ((user?.tokens || 0) < TOKEN_COST) {
       toast.error("Not enough tokens! Please top up to continue.");
@@ -70,7 +70,7 @@ const FlashCardPage = () => {
 
       await refreshProfile();
 
-      toast.success("Flashcards generated successfully! (-3 tokens)");
+      toast.success("Flashcards generated successfully! (-10 tokens)");
       fetchFlashcards();
     } catch (error) {
       toast.error(error.message || "Failed to generate flashcards.");
@@ -206,7 +206,7 @@ const FlashCardPage = () => {
                   // Optional safety check before opening modal:
                   if ((user?.tokens || 0) < 3) {
                     toast.error(
-                      "You need at least 3 tokens to generate flashcards!",
+                      "You need at least 10 tokens to generate flashcards!",
                     );
                     return;
                   }
@@ -263,7 +263,7 @@ const FlashCardPage = () => {
           <div className="text-xs text-neutral-500 flex items-center gap-1">
             <span>This action will cost</span>
             <span className="font-semibold text-neutral-800 flex items-center gap-0.5">
-              <Coins size={12} color="orange" /> 3 tokens
+              <Coins size={12} color="orange" /> 10 tokens
             </span>
             <span>(You have {user?.tokens || 0})</span>
           </div>
